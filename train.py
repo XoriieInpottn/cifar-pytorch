@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 import dataset
 from evaluate import ClassificationMeter
-from models import ResNet18
+from models.resnet import ResNet18
 
 cv.setNumThreads(0)
 
@@ -57,7 +57,7 @@ class Trainer(object):
         )
 
     def _create_model(self):
-        self.model = ResNet18()
+        self.model = ResNet18(num_classes=10)
 
         def foo(m: nn.Module):
             for name, child in m.named_children():
