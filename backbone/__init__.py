@@ -5,6 +5,11 @@
 @since: 2022-02-21
 """
 
+from .vgg import vgg11
+from .vgg import vgg13
+from .vgg import vgg16
+from .vgg import vgg19
+
 from .resnet import resnet18
 from .resnet import resnet34
 from .resnet import resnet50

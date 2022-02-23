@@ -29,7 +29,7 @@ def create_model(backbone_name: str, num_classes: int):
     def foo(m: nn.Module):
         for name, child in m.named_children():
             if isinstance(child, nn.ReLU):
-                setattr(m, name, nn.SiLU())
+                setattr(m, name, nn.SiLU(inplace=True))
             else:
                 foo(child)
 

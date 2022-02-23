@@ -19,10 +19,11 @@ def main():
     parser.add_argument('--gpu', type=str, default='0')
     parser.add_argument('--data-path', required=True)
     parser.add_argument('--num-classes', type=int, required=True)
+    parser.add_argument('--backbone', required=True)
 
     parser.add_argument('--optimizer', default='AdamW')
-    parser.add_argument('--max-lr', type=float, default=3e-3)
-    parser.add_argument('--min-lr', type=float, default=1e-6)
+    parser.add_argument('--max-lr', type=float, default=1.2e-3)
+    parser.add_argument('--min-lr', type=float, default=1e-4)
     parser.add_argument('--momentum', type=float, default=0.93)
     parser.add_argument('--weight-decay', type=float, default=0.3)
     parser.add_argument('--batch-size', type=int, default=256)
@@ -42,7 +43,7 @@ def main():
     args.test_data_path = os.path.join(args.data_path, 'test.ds')
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    model = create_model('resnet34', args.num_classes)
+    model = create_model(args.backbone, args.num_classes)
     model = model.to(args.device)
 
     kwargs = {}

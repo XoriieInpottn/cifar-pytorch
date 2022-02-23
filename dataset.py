@@ -33,7 +33,7 @@ class Cifar10Dataset(Dataset):
 
     def __getitem__(self, i):
         doc = self.docs[i]
-        image = doc['feature']
+        image = doc['image']
         image = self.aug(image=image)
         image = ImageNet.encode_image(image)
         label = doc['label']
