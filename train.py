@@ -3,15 +3,22 @@
 
 import argparse
 import os
+import random
 import shutil
 
 import cv2 as cv
+import numpy as np
 import torch
 
 from model import create_model
 from trainer import Trainer
 
 cv.setNumThreads(0)
+
+np.random.seed(0)
+random.seed(0)
+torch.random.manual_seed(0)
+torch.cuda.manual_seed(0)
 
 
 def main():
@@ -22,8 +29,8 @@ def main():
     parser.add_argument('--backbone', required=True)
 
     parser.add_argument('--optimizer', default='AdamW')
-    parser.add_argument('--max-lr', type=float, default=1.2e-3)
-    parser.add_argument('--min-lr', type=float, default=1e-4)
+    parser.add_argument('--max-lr', type=float, default=1e-3)
+    parser.add_argument('--min-lr', type=float, default=1e-6)
     parser.add_argument('--momentum', type=float, default=0.93)
     parser.add_argument('--weight-decay', type=float, default=0.3)
     parser.add_argument('--batch-size', type=int, default=256)

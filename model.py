@@ -8,7 +8,7 @@
 import torch
 from torch import nn
 
-import backbone
+from torchstocks.models import cifar as backbone
 
 
 class PSwish(nn.Module):
@@ -22,16 +22,17 @@ class PSwish(nn.Module):
         return x * (a * x).sigmoid()
 
 
-def create_model(backbone_name: str, num_classes: int):
+def create_model(backbone_name: str, num_classes: int, non_lin=nn.SiLU):
     fn = getattr(backbone, backbone_name)
     model = fn(num_classes=num_classes)
 
-    def foo(m: nn.Module):
+    def _foo(m: nn.Module):
         for name, child in m.named_children():
-            if isinstance(child, nn.ReLU):
-                setattr(m, name, nn.SiLU(inplace=True))
-            else:
-                foo(child)
+            if non_lin is not None and isinstance(child, nn.ReLU):
+                setattr(m, name, non_lin())
+            # if isinstance(child, nn.BatchNorm2d):
+            #     setattr(m, name, LayerNorm2d(child.num_features))
+            _foo(child)
 
-    # foo(model)
+    _foo(model)
     return model

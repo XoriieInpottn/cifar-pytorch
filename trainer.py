@@ -17,6 +17,7 @@ from torchcommon.optim.lr_scheduler import CosineWarmUpAnnealingLR
 from tqdm import tqdm
 
 import dataset
+from torchstocks.optim import scale_grad_by_value
 from torchstocks.utils.metrics import ClassificationMeter
 
 
@@ -75,10 +76,9 @@ class Tester(AbstractTester):
         for doc in test_loop:
             x = doc['image']
             y_true = doc['label']
-            # x, y_true = doc
             y_pred = self.inference(x)
-            meter.add(y_pred.numpy(), y_true.numpy())
-        result = OrderedDict(acc=meter.accuracy_score())
+            meter.update(y_true.numpy(), y_pred.numpy())
+        result = OrderedDict(acc=meter.accuracy(), f1=meter.f1().mean())
         return result
 
 
@@ -126,22 +126,42 @@ class Trainer(AbstractTrainer):
         )
 
     def _create_optimizer(self):
-        params = []
+        bn_params = []
+        for m in self.model.modules():
+            if 'Norm' in m.__class__.__name__:
+                bn_params.append(id(m.weight))
+                bn_params.append(id(m.bias))
+        params = [
+            {'params': []},
+            {'params': [], 'weight_decay': 0.0}
+        ]
         for p in self.model.parameters():
             if p.requires_grad:
-                params.append(p)
+                if id(p) not in bn_params:
+                    params[0]['params'].append(p)
+                else:
+                    params[1]['params'].append(p)
+        print(len(params[0]['params']), len(params[1]['params']))
         from torch import optim
         opt_class = getattr(optim, self.optimizer_name, None)
         if opt_class is None:
             from torchstocks import optim
             opt_class = getattr(optim, self.optimizer_name, None)
         assert opt_class is not None
-        self.optimizer = opt_class(
-            params,
-            lr=self.max_lr,
-            weight_decay=self.weight_decay,
-            betas=(self.momentum, 0.999)
-        )
+        opt_args = {
+            'params': params,
+            'lr': self.max_lr,
+            'weight_decay': self.weight_decay,
+            'momentum': self.momentum,  # SGD, RMSprop
+            'betas': (self.momentum, 0.999),  # Adam*
+            'nesterov': True  # SGD
+        }
+        co = opt_class.__init__.__code__
+        self.optimizer = opt_class(**{
+            name: opt_args[name]
+            for name in co.co_varnames[1:co.co_argcount]
+            if name in opt_args
+        })
         print(type(self.optimizer))
         num_loops = len(self.train_loader) * self.num_epochs
         self.scheduler = CosineWarmUpAnnealingLR(
@@ -169,6 +189,7 @@ class Trainer(AbstractTrainer):
 
         self.optimizer.zero_grad()
         loss.backward()
+        scale_grad_by_value(self.model.parameters(), 0.1)
         self.optimizer.step()
         self.scheduler.step()
 
@@ -183,7 +204,6 @@ class Trainer(AbstractTrainer):
             for doc in loop:
                 x = doc['image']
                 y_true = doc['label']
-                # x, y_true = doc
                 loss = self.train(x, y_true)
 
                 loss_g = 0.9 * loss_g + 0.1 * float(loss) if loss_g is not None else float(loss)
