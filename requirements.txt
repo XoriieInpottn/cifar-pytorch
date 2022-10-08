@@ -1,6 +1,6 @@
 torch
-tqdm
 torchcommon
+tqdm
 numpy
 imgaug
 docset

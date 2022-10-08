@@ -4,20 +4,15 @@
 from docset import DocSet
 from imgaug import augmenters as iaa
 from torch.utils.data import Dataset
+from torchcommon.utils.vision import normalize_image
 
-import torchstocks
 
+class BaseDataset(Dataset):
 
-class Cifar10Dataset(Dataset):
-
-    def __init__(self, path: str, train):
-        super(Cifar10Dataset, self).__init__()
+    def __init__(self, path: str, aug: iaa.Augmenter):
+        super(BaseDataset, self).__init__()
         self.docs = DocSet(path, 'r')
-        self.aug = iaa.Sequential([
-            iaa.Fliplr(0.5),
-            iaa.Pad(4, keep_size=False),
-            iaa.CropToFixedSize(32, 32),
-        ]) if train else iaa.Identity()
+        self.aug = aug
 
     def __len__(self):
         return len(self.docs)
@@ -26,9 +21,31 @@ class Cifar10Dataset(Dataset):
         doc = self.docs[i]
         image = doc['image']
         image = self.aug(image=image)
-        image = torchstocks.utils.image.encode_image(image)
+        image = normalize_image(image)
         label = doc['label']
         return {
             'image': image,
             'label': label
         }
+
+
+class TrainDataset(BaseDataset):
+
+    def __init__(self, path: str):
+        super(TrainDataset, self).__init__(
+            path=path,
+            aug=iaa.Sequential([
+                iaa.Fliplr(0.5),
+                iaa.Pad(4, keep_size=False),
+                iaa.CropToFixedSize(32, 32),
+            ])
+        )
+
+
+class TestDataset(BaseDataset):
+
+    def __init__(self, path: str):
+        super(TestDataset, self).__init__(
+            path=path,
+            aug=iaa.Identity()
+        )

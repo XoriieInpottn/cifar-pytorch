@@ -1,217 +1,149 @@
 #!/usr/bin/env python3
-
-"""
-@author: Guangyi
-@since: 2022-02-21
-"""
-
-import abc
-from collections import OrderedDict
-from typing import List, Union
+import math
 
 import torch
-from torch import nn
-from torch.nn import functional as F
+from torch import optim, nn
+from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader
-from torchcommon.optim.lr_scheduler import CosineWarmUpAnnealingLR
+from torchcommon import BaseConfig
+from torchcommon.optim import LRScheduler, CosineWarmupDecay
+from torchcommon.utils.metrics import ClassificationMeter
 from tqdm import tqdm
 
-import dataset
-from torchstocks.optim import scale_grad_by_value
-from torchstocks.utils.metrics import ClassificationMeter
+
+class TrainerConfig(BaseConfig):
+
+    def __init__(self):
+        super(TrainerConfig, self).__init__()
+
+        self.model = None
+        self.criterion = None
+
+        self.train_dataset = None
+        self.test_dataset = None
+
+        self.optimizer = 'AdamW'
+        self.batch_size = 256
+        self.max_lr = 1e-3
+        self.momentum = 0.9
+        self.weight_decay = 0.3
+        self.num_epochs = 100
+        self.num_workers = 10
+
+        self.device = None
 
 
-class AbstractTester(abc.ABC):
+class Trainer(object):
 
-    def inference(self, x: torch.Tensor):
-        raise NotImplementedError()
+    def __init__(self, config: TrainerConfig):
+        self.config = config
 
-    def run(self):
-        raise NotImplementedError()
+        self.model = config.model
+        self.model.to(self.config.device)
+        self.criterion = config.criterion
+        if isinstance(self.criterion, nn.Module):
+            self.criterion.to(self.config.device)
 
+        self._init_dataloader()
+        self._init_optimizer()
 
-class AbstractTrainer(abc.ABC):
+    def _init_dataloader(self):
+        self.train_loader = DataLoader(
+            self.config.train_dataset,
+            batch_size=self.config.batch_size,
+            shuffle=True,
+            num_workers=self.config.num_workers,
+            pin_memory=True,
+            persistent_workers=True
+        ) if self.config.train_dataset is not None else None
 
-    def train(self, x: torch.Tensor, y: torch.Tensor):
-        raise NotImplementedError()
-
-    def run(self):
-        raise NotImplementedError()
-
-
-class Tester(AbstractTester):
-
-    def __init__(self,
-                 model: nn.Module,
-                 data_path: Union[str, List[str]],
-                 batch_size: int,
-                 device):
-        super(Tester, self).__init__()
-        self.model = model
-        self.data_path = data_path
-        self.batch_size = batch_size
-        self.device = device
-
-        self.data_loader = DataLoader(
-            dataset.Cifar10Dataset(self.data_path, False),
-            batch_size=self.batch_size,
+        self.test_loader = DataLoader(
+            self.config.test_dataset,
+            batch_size=self.config.batch_size,
             shuffle=False,
             num_workers=10,
             pin_memory=True
-        )
+        ) if self.config.test_dataset is not None else None
 
-    def inference(self, x: torch.Tensor):
-        with torch.no_grad():
-            x = x.to(self.device)
-            output = self.model(x)
-            y = output.argmax(-1)
+    def _init_optimizer(self):
+        # Get optimizer constructor.
+        Optimizer = getattr(optim, self.config.optimizer)
 
-            y = y.detach().cpu()
-            return y
-
-    def run(self):
-        meter = ClassificationMeter()
-        self.model.eval()
-        test_loop = tqdm(self.data_loader, leave=False, ncols=96)
-        for doc in test_loop:
-            x = doc['image']
-            y_true = doc['label']
-            y_pred = self.inference(x)
-            meter.update(y_true.numpy(), y_pred.numpy())
-        result = OrderedDict(acc=meter.accuracy(), f1=meter.f1().mean())
-        return result
-
-
-class Trainer(AbstractTrainer):
-
-    def __init__(self,
-                 model: nn.Module,
-                 train_data_path: Union[str, List[str]],
-                 test_data_path: Union[str, List[str]],
-                 optimizer: str,
-                 max_lr: float,
-                 min_lr: float,
-                 weight_decay: float,
-                 momentum: float,
-                 batch_size: int,
-                 num_epochs: int,
-                 output_dir: str,
-                 device):
-        super(Trainer, self).__init__()
-        self.model = model
-        self.train_data_path = train_data_path
-        self.test_data_path = test_data_path
-        self.optimizer_name = optimizer
-        self.max_lr = max_lr
-        self.min_lr = min_lr
-        self.weight_decay = weight_decay
-        self.momentum = momentum
-        self.batch_size = batch_size
-        self.num_epochs = num_epochs
-        self.output_dir = output_dir
-        self.device = device
-
-        self._create_dataset()
-        self._create_optimizer()
-        self._create_tester()
-
-    def _create_dataset(self):
-        self.train_loader = DataLoader(
-            dataset.Cifar10Dataset(self.train_data_path, True),
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=10,
-            pin_memory=True,
-            persistent_workers=True
-        )
-
-    def _create_optimizer(self):
-        bn_params = []
-        for m in self.model.modules():
-            if 'Norm' in m.__class__.__name__:
-                bn_params.append(id(m.weight))
-                bn_params.append(id(m.bias))
-        params = [
-            {'params': []},
-            {'params': [], 'weight_decay': 0.0}
-        ]
-        for p in self.model.parameters():
-            if p.requires_grad:
-                if id(p) not in bn_params:
-                    params[0]['params'].append(p)
-                else:
-                    params[1]['params'].append(p)
-        print(len(params[0]['params']), len(params[1]['params']))
-        from torch import optim
-        opt_class = getattr(optim, self.optimizer_name, None)
-        if opt_class is None:
-            from torchstocks import optim
-            opt_class = getattr(optim, self.optimizer_name, None)
-        assert opt_class is not None
+        # Create optimizer.
         opt_args = {
-            'params': params,
-            'lr': self.max_lr,
-            'weight_decay': self.weight_decay,
-            'momentum': self.momentum,  # SGD, RMSprop
-            'betas': (self.momentum, 0.999),  # Adam*
-            'nesterov': True  # SGD
+            'params': [*self.model.parameters()],
+            'lr': self.config.max_lr,
+            'weight_decay': self.config.weight_decay,
+            'momentum': self.config.momentum,  # SGD, RMSprop
+            'betas': (self.config.momentum, 0.999),  # Adam*
         }
-        co = opt_class.__init__.__code__
-        self.optimizer = opt_class(**{
+        co = Optimizer.__init__.__code__
+        self.optimizer: optim.optimizer = Optimizer(**{
             name: opt_args[name]
             for name in co.co_varnames[1:co.co_argcount]
             if name in opt_args
         })
-        print(type(self.optimizer))
-        num_loops = len(self.train_loader) * self.num_epochs
-        self.scheduler = CosineWarmUpAnnealingLR(
-            self.optimizer,
-            num_loops=num_loops,
-            min_factor=self.min_lr / self.max_lr
-        )
 
-    def _create_tester(self):
-        self.tester = Tester(
-            self.model,
-            data_path=self.test_data_path,
-            batch_size=self.batch_size,
-            device=self.device
-        ) if self.test_data_path else None
+        # Create scheduler.
+        num_loops = self.config.num_epochs * len(self.train_loader)
+        self.scheduler = LRScheduler(self.optimizer, CosineWarmupDecay(num_loops))
 
-    def train(self, x: torch.Tensor, y: torch.Tensor):
-        x = x.to(self.device)
-        y = y.to(self.device)
+    def train_step(self, x: torch.Tensor, y: torch.Tensor):
+        x = x.to(self.config.device)
+        y = y.to(self.config.device)
 
-        output = self.model(x)
-        output = F.softmax(output, -1)
-        target = F.one_hot(y, output.shape[-1]).float()
-        loss = -((output * target).sum(-1) + 1e-10).log().mean()
+        y_ = self.model(x)
+        loss = self.criterion(y_, y)
 
-        self.optimizer.zero_grad()
         loss.backward()
-        scale_grad_by_value(self.model.parameters(), 0.1)
+        clip_grad_norm_(self.model.parameters(), 0.1, math.inf)
         self.optimizer.step()
+        self.optimizer.zero_grad(set_to_none=True)
         self.scheduler.step()
+        return loss.detach().cpu()
 
-        loss = loss.detach().cpu()
-        return loss
+    def predict_step(self, x: torch.Tensor):
+        with torch.no_grad():
+            x = x.to(self.config.device)
+            y_ = self.model(x)
+            y_ = y_.argmax(-1)
+            return y_.detach().cpu()
 
-    def run(self):
+    def train(self):
+        if self.train_loader is None:
+            return
+
         loss_g = None
-        for epoch in range(self.num_epochs):
+        for epoch in range(self.config.num_epochs):
             self.model.train()
             loop = tqdm(self.train_loader, leave=False, ncols=96)
             for doc in loop:
-                x = doc['image']
-                y_true = doc['label']
-                loss = self.train(x, y_true)
-
+                x, y = doc['image'], doc['label']
+                loss = self.train_step(x, y)
                 loss_g = 0.9 * loss_g + 0.1 * float(loss) if loss_g is not None else float(loss)
-                lr = self.scheduler.get_last_lr()[0]
-                info = f'[{epoch + 1}/{self.num_epochs}] L={loss_g:.06f} LR={lr:.02e}'
+                lr = self.optimizer.param_groups[0]['lr']
+                info = f'[{epoch + 1}/{self.config.num_epochs}] L={loss_g:.06f} LR={lr:.02e}'
                 loop.set_description(info, False)
 
-            info = f'[{epoch + 1}/{self.num_epochs}] L={loss_g:.06f}'
-            if self.tester:
-                info += ''.join([f' {k}={v:.04f}' for k, v in self.tester.run().items()])
-            tqdm.write(info)
+            metrics = self.evaluate()
+            if metrics:
+                print(f'[{epoch + 1}/{self.config.num_epochs}] L={loss_g:.06f}', end='')
+                for k, v in metrics.items():
+                    print(f' {k}={v:.04f}', end='')
+                print()
+
+    def evaluate(self):
+        if self.test_loader is None:
+            return
+
+        meter = ClassificationMeter()
+        self.model.eval()
+        loop = tqdm(self.test_loader, leave=False, ncols=96)
+        for doc in loop:
+            x, y = doc['image'], doc['label']
+            y_ = self.predict_step(x)
+            meter.update(output=y_.numpy(), target=y.numpy())
+        return {
+            'Acc': meter.accuracy(),
+            'F1': meter.f1().mean()
+        }
