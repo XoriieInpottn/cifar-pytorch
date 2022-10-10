@@ -4,7 +4,7 @@
 from docset import DocSet
 from imgaug import augmenters as iaa
 from torch.utils.data import Dataset
-from torchcommon.utils.vision import normalize_image
+from torchcommon.utils.image import normalize_image, hwc_to_chw
 
 
 class BaseDataset(Dataset):
@@ -21,7 +21,7 @@ class BaseDataset(Dataset):
         doc = self.docs[i]
         image = doc['image']
         image = self.aug(image=image)
-        image = normalize_image(image)
+        image = normalize_image(image, transpose=True)
         label = doc['label']
         return {
             'image': image,

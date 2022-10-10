@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+
 import math
+from typing import Union
 
 import torch
 from torch import optim, nn
@@ -18,10 +20,8 @@ class TrainerConfig(BaseConfig):
 
         self.model = None
         self.criterion = None
-
         self.train_dataset = None
         self.test_dataset = None
-
         self.optimizer = 'AdamW'
         self.batch_size = 256
         self.max_lr = 1e-3
@@ -29,7 +29,6 @@ class TrainerConfig(BaseConfig):
         self.weight_decay = 0.3
         self.num_epochs = 100
         self.num_workers = 10
-
         self.device = None
 
 
@@ -39,58 +38,68 @@ class Trainer(object):
         self.config = config
 
         self.model = config.model
-        self.model.to(self.config.device)
+        self.criterion = config.criterion
+        self.train_dataset = config.train_dataset
+        self.test_dataset = config.test_dataset
+        self.optimizer: Union[str, optim.Optimizer] = config.optimizer
+        self.batch_size = config.batch_size
+        self.max_lr = config.max_lr
+        self.momentum = config.momentum
+        self.weight_decay = config.weight_decay
+        self.num_epochs = config.num_epochs
+        self.num_workers = config.num_workers
+        self.device = config.device
+
+        self.model.to(self.device)
         self.criterion = config.criterion
         if isinstance(self.criterion, nn.Module):
-            self.criterion.to(self.config.device)
+            self.criterion.to(self.device)
 
         self._init_dataloader()
         self._init_optimizer()
 
     def _init_dataloader(self):
         self.train_loader = DataLoader(
-            self.config.train_dataset,
-            batch_size=self.config.batch_size,
+            self.train_dataset,
+            batch_size=self.batch_size,
             shuffle=True,
-            num_workers=self.config.num_workers,
+            num_workers=self.num_workers,
             pin_memory=True,
             persistent_workers=True
-        ) if self.config.train_dataset is not None else None
+        ) if self.train_dataset is not None else None
 
         self.test_loader = DataLoader(
-            self.config.test_dataset,
-            batch_size=self.config.batch_size,
+            self.test_dataset,
+            batch_size=self.batch_size,
             shuffle=False,
             num_workers=10,
             pin_memory=True
-        ) if self.config.test_dataset is not None else None
+        ) if self.test_dataset is not None else None
 
     def _init_optimizer(self):
-        # Get optimizer constructor.
-        Optimizer = getattr(optim, self.config.optimizer)
-
         # Create optimizer.
         opt_args = {
             'params': [*self.model.parameters()],
-            'lr': self.config.max_lr,
-            'weight_decay': self.config.weight_decay,
-            'momentum': self.config.momentum,  # SGD, RMSprop
-            'betas': (self.config.momentum, 0.999),  # Adam*
+            'lr': self.max_lr,
+            'weight_decay': self.weight_decay,
+            'momentum': self.momentum,  # SGD, RMSprop
+            'betas': (self.momentum, 0.999),  # Adam*
         }
-        co = Optimizer.__init__.__code__
-        self.optimizer: optim.optimizer = Optimizer(**{
+        OptimizerType = getattr(optim, self.optimizer)
+        co = OptimizerType.__init__.__code__
+        self.optimizer = OptimizerType(**{
             name: opt_args[name]
             for name in co.co_varnames[1:co.co_argcount]
             if name in opt_args
         })
 
         # Create scheduler.
-        num_loops = self.config.num_epochs * len(self.train_loader)
+        num_loops = self.num_epochs * len(self.train_loader)
         self.scheduler = LRScheduler(self.optimizer, CosineWarmupDecay(num_loops))
 
     def train_step(self, x: torch.Tensor, y: torch.Tensor):
-        x = x.to(self.config.device)
-        y = y.to(self.config.device)
+        x = x.to(self.device)
+        y = y.to(self.device)
 
         y_ = self.model(x)
         loss = self.criterion(y_, y)
@@ -104,7 +113,7 @@ class Trainer(object):
 
     def predict_step(self, x: torch.Tensor):
         with torch.no_grad():
-            x = x.to(self.config.device)
+            x = x.to(self.device)
             y_ = self.model(x)
             y_ = y_.argmax(-1)
             return y_.detach().cpu()
@@ -114,7 +123,7 @@ class Trainer(object):
             return
 
         loss_g = None
-        for epoch in range(self.config.num_epochs):
+        for epoch in range(self.num_epochs):
             self.model.train()
             loop = tqdm(self.train_loader, leave=False, ncols=96)
             for doc in loop:
@@ -122,12 +131,12 @@ class Trainer(object):
                 loss = self.train_step(x, y)
                 loss_g = 0.9 * loss_g + 0.1 * float(loss) if loss_g is not None else float(loss)
                 lr = self.optimizer.param_groups[0]['lr']
-                info = f'[{epoch + 1}/{self.config.num_epochs}] L={loss_g:.06f} LR={lr:.02e}'
+                info = f'[{epoch + 1}/{self.num_epochs}] L={loss_g:.06f} LR={lr:.02e}'
                 loop.set_description(info, False)
 
             metrics = self.evaluate()
             if metrics:
-                print(f'[{epoch + 1}/{self.config.num_epochs}] L={loss_g:.06f}', end='')
+                print(f'[{epoch + 1}/{self.num_epochs}] L={loss_g:.06f}', end='')
                 for k, v in metrics.items():
                     print(f' {k}={v:.04f}', end='')
                 print()

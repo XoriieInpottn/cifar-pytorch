@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-
 import argparse
 import os
 import random
@@ -29,6 +28,7 @@ def main():
 
     parser.add_argument('--backbone', required=True)
     parser.add_argument('--non-lin')
+    parser.add_argument('--norm')
 
     parser.add_argument('--optimizer', default='AdamW')
     parser.add_argument('--batch-size', type=int, default=256)
@@ -47,6 +47,8 @@ def main():
     model_config = ModelConfig()
     model_config.load(args)
     model = Model(model_config)
+    print('==== Model config ====')
+    print(model_config)
 
     trainer_config = TrainerConfig()
     trainer_config.load(args)
@@ -56,6 +58,8 @@ def main():
     trainer_config.train_dataset = train_dataset
     trainer_config.test_dataset = test_dataset
     trainer = Trainer(trainer_config)
+    print('==== Trainer config ====')
+    print(trainer_config)
 
     trainer.train()
     return 0
