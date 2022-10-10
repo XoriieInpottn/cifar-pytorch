@@ -7,12 +7,10 @@ from torchcommon.models import cifar
 
 
 class ModelConfig(BaseConfig):
-
-    def __init__(self):
-        self.backbone = None
-        self.non_lin = None
-        self.norm = None
-        self.num_classes = None
+    backbone = None
+    non_lin = None
+    norm = None
+    num_classes = None
 
 
 def Model(config: ModelConfig):
@@ -43,7 +41,7 @@ def _replace_modules(module: nn.Module, NonLin, Norm):
             setattr(module, name, NonLin())
         if Norm is not None and isinstance(child, nn.BatchNorm2d):
             if issubclass(Norm, nn.GroupNorm):
-                norm = Norm(48, child.num_features)
+                norm = Norm(32, child.num_features)
             else:
                 norm = Norm(child.num_features)
             setattr(module, name, norm)

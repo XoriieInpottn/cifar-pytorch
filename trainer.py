@@ -14,22 +14,18 @@ from tqdm import tqdm
 
 
 class TrainerConfig(BaseConfig):
-
-    def __init__(self):
-        super(TrainerConfig, self).__init__()
-
-        self.model = None
-        self.criterion = None
-        self.train_dataset = None
-        self.test_dataset = None
-        self.optimizer = 'AdamW'
-        self.batch_size = 256
-        self.max_lr = 1e-3
-        self.momentum = 0.9
-        self.weight_decay = 0.3
-        self.num_epochs = 100
-        self.num_workers = 10
-        self.device = None
+    model = None
+    criterion = None
+    train_dataset = None
+    test_dataset = None
+    optimizer = 'AdamW'
+    batch_size = 256
+    max_lr = 1e-3
+    momentum = 0.9
+    weight_decay = 0.3
+    num_epochs = 100
+    num_workers = 10
+    device = None
 
 
 class Trainer(object):
